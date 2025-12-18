@@ -1,7 +1,31 @@
 import questionary
 from typing import List, Optional, Tuple, Dict
+import ollama as ollama_client
 
 from cli.models import AnalystType
+
+
+def get_ollama_models() -> list[tuple[str, str]]:
+    """Fetch available models from local Ollama instance."""
+    try:
+        response = ollama_client.list()
+        # Handle both dict and object response formats
+        models = getattr(response, 'models', None) or response.get('models', [])
+        if models:
+            return [(getattr(m, 'model', None) or m.get('name', str(m)),
+                     getattr(m, 'model', None) or m.get('name', str(m))) for m in models]
+    except Exception:
+        pass
+    return [("llama3.1", "llama3.1"), ("llama3.2", "llama3.2")]
+
+
+def check_ollama_connection() -> bool:
+    """Check if Ollama is running."""
+    try:
+        ollama_client.list()
+        return True
+    except Exception:
+        return False
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),
@@ -155,11 +179,15 @@ def select_shallow_thinking_agent(provider) -> str:
         ]
     }
 
+    options = SHALLOW_AGENT_OPTIONS.get(provider.lower(), [])
+    if provider.lower() == "ollama":
+        options = get_ollama_models()
+
     choice = questionary.select(
         "Select Your [Quick-Thinking LLM Engine]:",
         choices=[
             questionary.Choice(display, value=value)
-            for display, value in SHALLOW_AGENT_OPTIONS[provider.lower()]
+            for display, value in options
         ],
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
@@ -217,11 +245,15 @@ def select_deep_thinking_agent(provider) -> str:
         ]
     }
     
+    options = DEEP_AGENT_OPTIONS.get(provider.lower(), [])
+    if provider.lower() == "ollama":
+        options = get_ollama_models()
+
     choice = questionary.select(
         "Select Your [Deep-Thinking LLM Engine]:",
         choices=[
             questionary.Choice(display, value=value)
-            for display, value in DEEP_AGENT_OPTIONS[provider.lower()]
+            for display, value in options
         ],
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(

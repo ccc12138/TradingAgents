@@ -26,8 +26,12 @@ from rich.rule import Rule
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.i18n import get_text
 from cli.models import AnalystType
 from cli.utils import *
+
+# Get language from config
+LANG = DEFAULT_CONFIG.get("language", "en")
 
 console = Console()
 
@@ -107,13 +111,13 @@ class MessageBuffer:
         if latest_section and latest_content:
             # Format the current section for display
             section_titles = {
-                "market_report": "Market Analysis",
-                "sentiment_report": "Social Sentiment",
-                "news_report": "News Analysis",
-                "fundamentals_report": "Fundamentals Analysis",
-                "investment_plan": "Research Team Decision",
-                "trader_investment_plan": "Trading Team Plan",
-                "final_trade_decision": "Portfolio Management Decision",
+                "market_report": get_text("report_market", LANG),
+                "sentiment_report": get_text("report_sentiment", LANG),
+                "news_report": get_text("report_news", LANG),
+                "fundamentals_report": get_text("report_fundamentals", LANG),
+                "investment_plan": get_text("report_research", LANG),
+                "trader_investment_plan": get_text("report_trading", LANG),
+                "final_trade_decision": get_text("report_portfolio", LANG),
             }
             self.current_report = (
                 f"### {section_titles[latest_section]}\n{latest_content}"
@@ -135,37 +139,37 @@ class MessageBuffer:
                 "fundamentals_report",
             ]
         ):
-            report_parts.append("## Analyst Team Reports")
+            report_parts.append(f"## {get_text('report_analyst_team', LANG)}")
             if self.report_sections["market_report"]:
                 report_parts.append(
-                    f"### Market Analysis\n{self.report_sections['market_report']}"
+                    f"### {get_text('report_market', LANG)}\n{self.report_sections['market_report']}"
                 )
             if self.report_sections["sentiment_report"]:
                 report_parts.append(
-                    f"### Social Sentiment\n{self.report_sections['sentiment_report']}"
+                    f"### {get_text('report_sentiment', LANG)}\n{self.report_sections['sentiment_report']}"
                 )
             if self.report_sections["news_report"]:
                 report_parts.append(
-                    f"### News Analysis\n{self.report_sections['news_report']}"
+                    f"### {get_text('report_news', LANG)}\n{self.report_sections['news_report']}"
                 )
             if self.report_sections["fundamentals_report"]:
                 report_parts.append(
-                    f"### Fundamentals Analysis\n{self.report_sections['fundamentals_report']}"
+                    f"### {get_text('report_fundamentals', LANG)}\n{self.report_sections['fundamentals_report']}"
                 )
 
         # Research Team Reports
         if self.report_sections["investment_plan"]:
-            report_parts.append("## Research Team Decision")
+            report_parts.append(f"## {get_text('report_research', LANG)}")
             report_parts.append(f"{self.report_sections['investment_plan']}")
 
         # Trading Team Reports
         if self.report_sections["trader_investment_plan"]:
-            report_parts.append("## Trading Team Plan")
+            report_parts.append(f"## {get_text('report_trading', LANG)}")
             report_parts.append(f"{self.report_sections['trader_investment_plan']}")
 
         # Portfolio Management Decision
         if self.report_sections["final_trade_decision"]:
-            report_parts.append("## Portfolio Management Decision")
+            report_parts.append(f"## {get_text('report_portfolio', LANG)}")
             report_parts.append(f"{self.report_sections['final_trade_decision']}")
 
         self.final_report = "\n\n".join(report_parts) if report_parts else None
@@ -194,9 +198,9 @@ def update_display(layout, spinner_text=None):
     # Header with welcome message
     layout["header"].update(
         Panel(
-            "[bold green]Welcome to TradingAgents CLI[/bold green]\n"
+            f"[bold green]{get_text('panel_welcome_cli', LANG)}[/bold green]\n"
             "[dim]© [Tauric Research](https://github.com/TauricResearch)[/dim]",
-            title="Welcome to TradingAgents",
+            title=get_text("panel_welcome", LANG),
             border_style="green",
             padding=(1, 2),
             expand=True,
@@ -213,22 +217,22 @@ def update_display(layout, spinner_text=None):
         padding=(0, 2),  # Add horizontal padding
         expand=True,  # Make table expand to fill available space
     )
-    progress_table.add_column("Team", style="cyan", justify="center", width=20)
-    progress_table.add_column("Agent", style="green", justify="center", width=20)
-    progress_table.add_column("Status", style="yellow", justify="center", width=20)
+    progress_table.add_column(get_text("table_team", LANG), style="cyan", justify="center", width=20)
+    progress_table.add_column(get_text("table_agent", LANG), style="green", justify="center", width=20)
+    progress_table.add_column(get_text("table_status", LANG), style="yellow", justify="center", width=20)
 
     # Group agents by team
     teams = {
-        "Analyst Team": [
+        get_text("team_analyst", LANG): [
             "Market Analyst",
             "Social Analyst",
             "News Analyst",
             "Fundamentals Analyst",
         ],
-        "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
-        "Trading Team": ["Trader"],
-        "Risk Management": ["Risky Analyst", "Neutral Analyst", "Safe Analyst"],
-        "Portfolio Management": ["Portfolio Manager"],
+        get_text("team_research", LANG): ["Bull Researcher", "Bear Researcher", "Research Manager"],
+        get_text("team_trading", LANG): ["Trader"],
+        get_text("team_risk", LANG): ["Risky Analyst", "Neutral Analyst", "Safe Analyst"],
+        get_text("team_portfolio", LANG): ["Portfolio Manager"],
     }
 
     for team, agents in teams.items():
@@ -270,7 +274,7 @@ def update_display(layout, spinner_text=None):
         progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
 
     layout["progress"].update(
-        Panel(progress_table, title="Progress", border_style="cyan", padding=(1, 2))
+        Panel(progress_table, title=get_text("panel_progress", LANG), border_style="cyan", padding=(1, 2))
     )
 
     # Messages panel showing recent messages and tool calls
@@ -351,7 +355,7 @@ def update_display(layout, spinner_text=None):
     layout["messages"].update(
         Panel(
             messages_table,
-            title="Messages & Tools",
+            title=get_text("panel_messages", LANG),
             border_style="blue",
             padding=(1, 2),
         )
@@ -362,7 +366,7 @@ def update_display(layout, spinner_text=None):
         layout["analysis"].update(
             Panel(
                 Markdown(message_buffer.current_report),
-                title="Current Report",
+                title=get_text("panel_report", LANG),
                 border_style="green",
                 padding=(1, 2),
             )
@@ -370,8 +374,8 @@ def update_display(layout, spinner_text=None):
     else:
         layout["analysis"].update(
             Panel(
-                "[italic]Waiting for analysis report...[/italic]",
-                title="Current Report",
+                f"[italic]{get_text('waiting_report', LANG)}[/italic]",
+                title=get_text("panel_report", LANG),
                 border_style="green",
                 padding=(1, 2),
             )
@@ -403,9 +407,9 @@ def get_user_selections():
 
     # Create welcome box content
     welcome_content = f"{welcome_ascii}\n"
-    welcome_content += "[bold green]TradingAgents: Multi-Agents LLM Financial Trading Framework - CLI[/bold green]\n\n"
-    welcome_content += "[bold]Workflow Steps:[/bold]\n"
-    welcome_content += "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
+    welcome_content += f"[bold green]TradingAgents: {get_text('panel_subtitle', LANG)} - CLI[/bold green]\n\n"
+    welcome_content += f"[bold]{get_text('workflow_steps', LANG)}[/bold]\n"
+    welcome_content += f"{get_text('workflow_desc', LANG)}\n\n"
     welcome_content += (
         "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
     )
@@ -415,8 +419,8 @@ def get_user_selections():
         welcome_content,
         border_style="green",
         padding=(1, 2),
-        title="Welcome to TradingAgents",
-        subtitle="Multi-Agents LLM Financial Trading Framework",
+        title=get_text("panel_welcome", LANG),
+        subtitle=get_text("panel_subtitle", LANG),
     )
     console.print(Align.center(welcome_box))
     console.print()  # Add a blank line after the welcome box
@@ -432,57 +436,57 @@ def get_user_selections():
     # Step 1: Ticker symbol
     console.print(
         create_question_box(
-            "Step 1: Ticker Symbol", "Enter the ticker symbol to analyze", "SPY"
+            get_text("step_ticker", LANG), get_text("prompt_ticker_default", LANG), "SPY"
         )
     )
-    selected_ticker = get_ticker()
+    selected_ticker = get_ticker(LANG)
 
     # Step 2: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
     console.print(
         create_question_box(
-            "Step 2: Analysis Date",
-            "Enter the analysis date (YYYY-MM-DD)",
+            get_text("step_date", LANG),
+            get_text("prompt_date_default", LANG),
             default_date,
         )
     )
-    analysis_date = get_analysis_date()
+    analysis_date = get_analysis_date(LANG)
 
     # Step 3: Select analysts
     console.print(
         create_question_box(
-            "Step 3: Analysts Team", "Select your LLM analyst agents for the analysis"
+            get_text("step_analysts", LANG), get_text("prompt_analysts", LANG)
         )
     )
-    selected_analysts = select_analysts()
+    selected_analysts = select_analysts(LANG)
     console.print(
-        f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
+        f"[green]{get_text('selected_analysts', LANG)}[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )
 
     # Step 4: Research depth
     console.print(
         create_question_box(
-            "Step 4: Research Depth", "Select your research depth level"
+            get_text("step_depth", LANG), get_text("prompt_depth", LANG)
         )
     )
-    selected_research_depth = select_research_depth()
+    selected_research_depth = select_research_depth(LANG)
 
     # Step 5: OpenAI backend
     console.print(
         create_question_box(
-            "Step 5: OpenAI backend", "Select which service to talk to"
+            get_text("step_provider", LANG), get_text("prompt_provider", LANG)
         )
     )
-    selected_llm_provider, backend_url = select_llm_provider()
-    
+    selected_llm_provider, backend_url = select_llm_provider(LANG)
+
     # Step 6: Thinking agents
     console.print(
         create_question_box(
-            "Step 6: Thinking Agents", "Select your thinking agents for analysis"
+            get_text("step_thinking", LANG), get_text("prompt_quick_llm", LANG)
         )
     )
-    selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
-    selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider)
+    selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider, LANG)
+    selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider, LANG)
 
     return {
         "ticker": selected_ticker,
@@ -496,12 +500,12 @@ def get_user_selections():
     }
 
 
-def get_ticker():
+def get_ticker(lang: str = "en"):
     """Get ticker symbol from user input."""
     return typer.prompt("", default="SPY")
 
 
-def get_analysis_date():
+def get_analysis_date(lang: str = "en"):
     """Get the analysis date from user input."""
     while True:
         date_str = typer.prompt(
@@ -511,18 +515,18 @@ def get_analysis_date():
             # Validate date format and ensure it's not in the future
             analysis_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
             if analysis_date.date() > datetime.datetime.now().date():
-                console.print("[red]Error: Analysis date cannot be in the future[/red]")
+                console.print(f"[red]{get_text('error_future_date', lang)}[/red]")
                 continue
             return date_str
         except ValueError:
             console.print(
-                "[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]"
+                f"[red]{get_text('error_invalid_date', lang)}[/red]"
             )
 
 
 def display_complete_report(final_state):
     """Display the complete analysis report with team-based panels."""
-    console.print("\n[bold green]Complete Analysis Report[/bold green]\n")
+    console.print(f"\n[bold green]{get_text('report_complete', LANG)}[/bold green]\n")
 
     # I. Analyst Team Reports
     analyst_reports = []
@@ -532,7 +536,7 @@ def display_complete_report(final_state):
         analyst_reports.append(
             Panel(
                 Markdown(final_state["market_report"]),
-                title="Market Analyst",
+                title=get_text("agent_market", LANG),
                 border_style="blue",
                 padding=(1, 2),
             )
@@ -543,7 +547,7 @@ def display_complete_report(final_state):
         analyst_reports.append(
             Panel(
                 Markdown(final_state["sentiment_report"]),
-                title="Social Analyst",
+                title=get_text("agent_social", LANG),
                 border_style="blue",
                 padding=(1, 2),
             )
@@ -554,7 +558,7 @@ def display_complete_report(final_state):
         analyst_reports.append(
             Panel(
                 Markdown(final_state["news_report"]),
-                title="News Analyst",
+                title=get_text("agent_news", LANG),
                 border_style="blue",
                 padding=(1, 2),
             )
@@ -565,7 +569,7 @@ def display_complete_report(final_state):
         analyst_reports.append(
             Panel(
                 Markdown(final_state["fundamentals_report"]),
-                title="Fundamentals Analyst",
+                title=get_text("agent_fundamentals", LANG),
                 border_style="blue",
                 padding=(1, 2),
             )
@@ -575,7 +579,7 @@ def display_complete_report(final_state):
         console.print(
             Panel(
                 Columns(analyst_reports, equal=True, expand=True),
-                title="I. Analyst Team Reports",
+                title=f"I. {get_text('report_analyst_team', LANG)}",
                 border_style="cyan",
                 padding=(1, 2),
             )
@@ -591,7 +595,7 @@ def display_complete_report(final_state):
             research_reports.append(
                 Panel(
                     Markdown(debate_state["bull_history"]),
-                    title="Bull Researcher",
+                    title=get_text("agent_bull", LANG),
                     border_style="blue",
                     padding=(1, 2),
                 )
@@ -602,7 +606,7 @@ def display_complete_report(final_state):
             research_reports.append(
                 Panel(
                     Markdown(debate_state["bear_history"]),
-                    title="Bear Researcher",
+                    title=get_text("agent_bear", LANG),
                     border_style="blue",
                     padding=(1, 2),
                 )
@@ -613,7 +617,7 @@ def display_complete_report(final_state):
             research_reports.append(
                 Panel(
                     Markdown(debate_state["judge_decision"]),
-                    title="Research Manager",
+                    title=get_text("agent_research_mgr", LANG),
                     border_style="blue",
                     padding=(1, 2),
                 )
@@ -623,7 +627,7 @@ def display_complete_report(final_state):
             console.print(
                 Panel(
                     Columns(research_reports, equal=True, expand=True),
-                    title="II. Research Team Decision",
+                    title=f"II. {get_text('report_research', LANG)}",
                     border_style="magenta",
                     padding=(1, 2),
                 )
@@ -635,11 +639,11 @@ def display_complete_report(final_state):
             Panel(
                 Panel(
                     Markdown(final_state["trader_investment_plan"]),
-                    title="Trader",
+                    title=get_text("agent_trader", LANG),
                     border_style="blue",
                     padding=(1, 2),
                 ),
-                title="III. Trading Team Plan",
+                title=f"III. {get_text('report_trading', LANG)}",
                 border_style="yellow",
                 padding=(1, 2),
             )
@@ -655,7 +659,7 @@ def display_complete_report(final_state):
             risk_reports.append(
                 Panel(
                     Markdown(risk_state["risky_history"]),
-                    title="Aggressive Analyst",
+                    title=get_text("agent_aggressive", LANG),
                     border_style="blue",
                     padding=(1, 2),
                 )
@@ -666,7 +670,7 @@ def display_complete_report(final_state):
             risk_reports.append(
                 Panel(
                     Markdown(risk_state["safe_history"]),
-                    title="Conservative Analyst",
+                    title=get_text("agent_conservative", LANG),
                     border_style="blue",
                     padding=(1, 2),
                 )
@@ -677,7 +681,7 @@ def display_complete_report(final_state):
             risk_reports.append(
                 Panel(
                     Markdown(risk_state["neutral_history"]),
-                    title="Neutral Analyst",
+                    title=get_text("agent_neutral", LANG),
                     border_style="blue",
                     padding=(1, 2),
                 )
@@ -687,7 +691,7 @@ def display_complete_report(final_state):
             console.print(
                 Panel(
                     Columns(risk_reports, equal=True, expand=True),
-                    title="IV. Risk Management Team Decision",
+                    title=f"IV. {get_text('team_risk', LANG)}",
                     border_style="red",
                     padding=(1, 2),
                 )
@@ -699,11 +703,11 @@ def display_complete_report(final_state):
                 Panel(
                     Panel(
                         Markdown(risk_state["judge_decision"]),
-                        title="Portfolio Manager",
+                        title=get_text("agent_portfolio_mgr", LANG),
                         border_style="blue",
                         padding=(1, 2),
                     ),
-                    title="V. Portfolio Manager Decision",
+                    title=f"V. {get_text('report_portfolio', LANG)}",
                     border_style="green",
                     padding=(1, 2),
                 )

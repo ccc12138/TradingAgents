@@ -8,6 +8,8 @@ DEFAULT_CONFIG = {
         os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "dataflows/data_cache",
     ),
+    # Language settings
+    "language": "zh",  # Options: "en", "zh"
     # LLM settings
     "llm_provider": "openai",
     "deep_think_llm": "o4-mini",

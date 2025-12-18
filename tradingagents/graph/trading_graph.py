@@ -99,6 +99,9 @@ class TradingAgentsGraph:
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
 
+        # Get language from config
+        self.lang = self.config.get("language", "en")
+
         # Initialize components
         self.conditional_logic = ConditionalLogic()
         self.graph_setup = GraphSetup(
@@ -111,6 +114,7 @@ class TradingAgentsGraph:
             self.invest_judge_memory,
             self.risk_manager_memory,
             self.conditional_logic,
+            self.lang,
         )
 
         self.propagator = Propagator()

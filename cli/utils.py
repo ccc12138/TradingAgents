@@ -1,8 +1,12 @@
 import questionary
 from typing import List, Optional, Tuple, Dict
 import ollama as ollama_client
+from rich.console import Console
 
 from cli.models import AnalystType
+from tradingagents.i18n import get_text
+
+console = Console()
 
 
 def get_ollama_models() -> list[tuple[str, str]]:
@@ -35,11 +39,11 @@ ANALYST_ORDER = [
 ]
 
 
-def get_ticker() -> str:
+def get_ticker(lang: str = "en") -> str:
     """Prompt the user to enter a ticker symbol."""
     ticker = questionary.text(
-        "Enter the ticker symbol to analyze:",
-        validate=lambda x: len(x.strip()) > 0 or "Please enter a valid ticker symbol.",
+        get_text("prompt_ticker", lang),
+        validate=lambda x: len(x.strip()) > 0 or get_text("validate_ticker", lang),
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -49,13 +53,13 @@ def get_ticker() -> str:
     ).ask()
 
     if not ticker:
-        console.print("\n[red]No ticker symbol provided. Exiting...[/red]")
+        console.print(f"\n[red]{get_text('error_no_ticker', lang)}[/red]")
         exit(1)
 
     return ticker.strip().upper()
 
 
-def get_analysis_date() -> str:
+def get_analysis_date(lang: str = "en") -> str:
     """Prompt the user to enter a date in YYYY-MM-DD format."""
     import re
     from datetime import datetime
@@ -70,9 +74,9 @@ def get_analysis_date() -> str:
             return False
 
     date = questionary.text(
-        "Enter the analysis date (YYYY-MM-DD):",
+        get_text("prompt_date", lang),
         validate=lambda x: validate_date(x.strip())
-        or "Please enter a valid date in YYYY-MM-DD format.",
+        or get_text("validate_date", lang),
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -82,21 +86,21 @@ def get_analysis_date() -> str:
     ).ask()
 
     if not date:
-        console.print("\n[red]No date provided. Exiting...[/red]")
+        console.print(f"\n[red]{get_text('error_no_date', lang)}[/red]")
         exit(1)
 
     return date.strip()
 
 
-def select_analysts() -> List[AnalystType]:
+def select_analysts(lang: str = "en") -> List[AnalystType]:
     """Select analysts using an interactive checkbox."""
     choices = questionary.checkbox(
-        "Select Your [Analysts Team]:",
+        get_text("prompt_analysts", lang),
         choices=[
             questionary.Choice(display, value=value) for display, value in ANALYST_ORDER
         ],
-        instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
-        validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
+        instruction=get_text("instruction_analysts", lang),
+        validate=lambda x: len(x) > 0 or get_text("validate_analyst", lang),
         style=questionary.Style(
             [
                 ("checkbox-selected", "fg:green"),
@@ -108,28 +112,28 @@ def select_analysts() -> List[AnalystType]:
     ).ask()
 
     if not choices:
-        console.print("\n[red]No analysts selected. Exiting...[/red]")
+        console.print(f"\n[red]{get_text('error_no_analysts', lang)}[/red]")
         exit(1)
 
     return choices
 
 
-def select_research_depth() -> int:
+def select_research_depth(lang: str = "en") -> int:
     """Select research depth using an interactive selection."""
 
     # Define research depth options with their corresponding values
     DEPTH_OPTIONS = [
-        ("Shallow - Quick research, few debate and strategy discussion rounds", 1),
-        ("Medium - Middle ground, moderate debate rounds and strategy discussion", 3),
-        ("Deep - Comprehensive research, in depth debate and strategy discussion", 5),
+        (get_text("depth_shallow", lang), 1),
+        (get_text("depth_medium", lang), 3),
+        (get_text("depth_deep", lang), 5),
     ]
 
     choice = questionary.select(
-        "Select Your [Research Depth]:",
+        get_text("prompt_depth", lang),
         choices=[
             questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction=get_text("instruction_select", lang),
         style=questionary.Style(
             [
                 ("selected", "fg:yellow noinherit"),
@@ -140,13 +144,13 @@ def select_research_depth() -> int:
     ).ask()
 
     if choice is None:
-        console.print("\n[red]No research depth selected. Exiting...[/red]")
+        console.print(f"\n[red]{get_text('error_no_depth', lang)}[/red]")
         exit(1)
 
     return choice
 
 
-def select_shallow_thinking_agent(provider) -> str:
+def select_shallow_thinking_agent(provider, lang: str = "en") -> str:
     """Select shallow thinking llm engine using an interactive selection."""
 
     # Define shallow thinking llm engine options with their corresponding model names
@@ -184,12 +188,12 @@ def select_shallow_thinking_agent(provider) -> str:
         options = get_ollama_models()
 
     choice = questionary.select(
-        "Select Your [Quick-Thinking LLM Engine]:",
+        get_text("prompt_quick_llm", lang),
         choices=[
             questionary.Choice(display, value=value)
             for display, value in options
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction=get_text("instruction_select", lang),
         style=questionary.Style(
             [
                 ("selected", "fg:magenta noinherit"),
@@ -201,14 +205,14 @@ def select_shallow_thinking_agent(provider) -> str:
 
     if choice is None:
         console.print(
-            "\n[red]No shallow thinking llm engine selected. Exiting...[/red]"
+            f"\n[red]{get_text('error_no_quick_llm', lang)}[/red]"
         )
         exit(1)
 
     return choice
 
 
-def select_deep_thinking_agent(provider) -> str:
+def select_deep_thinking_agent(provider, lang: str = "en") -> str:
     """Select deep thinking llm engine using an interactive selection."""
 
     # Define deep thinking llm engine options with their corresponding model names
@@ -250,12 +254,12 @@ def select_deep_thinking_agent(provider) -> str:
         options = get_ollama_models()
 
     choice = questionary.select(
-        "Select Your [Deep-Thinking LLM Engine]:",
+        get_text("prompt_deep_llm", lang),
         choices=[
             questionary.Choice(display, value=value)
             for display, value in options
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction=get_text("instruction_select", lang),
         style=questionary.Style(
             [
                 ("selected", "fg:magenta noinherit"),
@@ -266,12 +270,13 @@ def select_deep_thinking_agent(provider) -> str:
     ).ask()
 
     if choice is None:
-        console.print("\n[red]No deep thinking llm engine selected. Exiting...[/red]")
+        console.print(f"\n[red]{get_text('error_no_deep_llm', lang)}[/red]")
         exit(1)
 
     return choice
 
-def select_llm_provider() -> tuple[str, str]:
+
+def select_llm_provider(lang: str = "en") -> tuple[str, str]:
     """Select the OpenAI api url using interactive selection."""
     # Define OpenAI api options with their corresponding endpoints
     BASE_URLS = [
@@ -283,12 +288,12 @@ def select_llm_provider() -> tuple[str, str]:
     ]
     
     choice = questionary.select(
-        "Select your LLM Provider:",
+        get_text("prompt_provider", lang),
         choices=[
             questionary.Choice(display, value=(display, value))
             for display, value in BASE_URLS
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction=get_text("instruction_select", lang),
         style=questionary.Style(
             [
                 ("selected", "fg:magenta noinherit"),
@@ -297,12 +302,12 @@ def select_llm_provider() -> tuple[str, str]:
             ]
         ),
     ).ask()
-    
+
     if choice is None:
-        console.print("\n[red]no OpenAI backend selected. Exiting...[/red]")
+        console.print(f"\n[red]{get_text('error_no_provider', lang)}[/red]")
         exit(1)
     
     display_name, url = choice
-    print(f"You selected: {display_name}\tURL: {url}")
+    print(f"{get_text('you_selected', lang)} {display_name}\tURL: {url}")
     
     return display_name, url

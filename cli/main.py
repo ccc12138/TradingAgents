@@ -436,7 +436,7 @@ def get_user_selections():
     # Step 1: Ticker symbol
     console.print(
         create_question_box(
-            get_text("step_ticker", LANG), get_text("prompt_ticker_default", LANG), "SPY"
+            get_text("step_ticker", LANG), get_text("prompt_ticker_default", LANG), "NVDA"
         )
     )
     selected_ticker = get_ticker(LANG)
@@ -502,7 +502,7 @@ def get_user_selections():
 
 def get_ticker(lang: str = "en"):
     """Get ticker symbol from user input."""
-    return typer.prompt("", default="SPY")
+    return typer.prompt("", default="NVDA")
 
 
 def get_analysis_date(lang: str = "en"):

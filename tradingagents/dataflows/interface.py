@@ -13,9 +13,17 @@ from .alpha_vantage import (
     get_cashflow as get_alpha_vantage_cashflow,
     get_income_statement as get_alpha_vantage_income_statement,
     get_insider_transactions as get_alpha_vantage_insider_transactions,
-    get_news as get_alpha_vantage_news
+    get_news as get_alpha_vantage_news,
+    get_global_news as get_alpha_vantage_global_news
 )
 from .alpha_vantage_common import AlphaVantageRateLimitError
+from .akshare_data import (
+    get_stock as get_akshare_stock,
+    get_balance_sheet as get_akshare_balance_sheet,
+    get_cashflow as get_akshare_cashflow,
+    get_income_statement as get_akshare_income_statement,
+    get_news as get_akshare_news
+)
 
 # Configuration and routing logic
 from .config import get_config
@@ -58,7 +66,8 @@ VENDOR_LIST = [
     "local",
     "yfinance",
     "openai",
-    "google"
+    "google",
+    "akshare"
 ]
 
 # Mapping of methods to their vendor-specific implementations
@@ -68,6 +77,7 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
         "local": get_YFin_data,
+        "akshare": get_akshare_stock,
     },
     # technical_indicators
     "get_indicators": {
@@ -84,16 +94,19 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
         "local": get_simfin_balance_sheet,
+        "akshare": get_akshare_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
         "local": get_simfin_cashflow,
+        "akshare": get_akshare_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
         "local": get_simfin_income_statements,
+        "akshare": get_akshare_income_statement,
     },
     # news_data
     "get_news": {
@@ -101,10 +114,12 @@ VENDOR_METHODS = {
         "openai": get_stock_news_openai,
         "google": get_google_news,
         "local": [get_finnhub_news, get_reddit_company_news, get_google_news],
+        "akshare": get_akshare_news,
     },
     "get_global_news": {
+        "alpha_vantage": get_alpha_vantage_global_news,
         "openai": get_global_news_openai,
-        "local": get_reddit_global_news
+        "local": get_reddit_global_news,
     },
     "get_insider_sentiment": {
         "local": get_finnhub_company_insider_sentiment

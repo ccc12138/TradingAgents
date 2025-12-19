@@ -75,8 +75,9 @@ class TradingAgentsGraph:
         # Initialize LLMs
         provider = self.config["llm_provider"].lower()
         if provider == "ollama":
-            self.deep_thinking_llm = ChatOllama(model=self.config["deep_think_llm"])
-            self.quick_thinking_llm = ChatOllama(model=self.config["quick_think_llm"])
+            num_ctx = self.config.get("ollama_num_ctx", 32768)
+            self.deep_thinking_llm = ChatOllama(model=self.config["deep_think_llm"], num_ctx=num_ctx)
+            self.quick_thinking_llm = ChatOllama(model=self.config["quick_think_llm"], num_ctx=num_ctx)
         elif provider in ("openai", "openrouter"):
             self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
             self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])

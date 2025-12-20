@@ -1,12 +1,75 @@
 import questionary
-from typing import List, Optional, Tuple, Dict
+from typing import Any, List, Optional, Tuple, Dict
 import ollama as ollama_client
 from rich.console import Console
+import os
+from openai import OpenAI
+import requests
+import re
 
 from cli.models import AnalystType
 from tradingagents.i18n import get_text
 
 console = Console()
+
+_OPENAI_MODEL_LIST_CACHE: Dict[str, list[tuple[str, str]]] = {}
+_ANTHROPIC_MODEL_LIST_CACHE: Dict[str, list[tuple[str, str]]] = {}
+_GOOGLE_MODEL_LIST_CACHE: Dict[str, list[tuple[str, str]]] = {}
+
+_NON_CHAT_MODEL_PATTERNS = [
+    r"embedding",
+    r"embed",
+    r"tts",
+    r"whisper",
+    r"transcrib",
+    r"speech",
+    r"audio",
+    r"moderation",
+    r"rerank",
+]
+
+
+def _looks_like_non_chat_model(model_id: str) -> bool:
+    lowered = (model_id or "").lower()
+    return any(re.search(pattern, lowered) for pattern in _NON_CHAT_MODEL_PATTERNS)
+
+
+def _filter_chat_models(provider: str, models: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    provider_key = (provider or "").lower()
+    filtered: list[tuple[str, str]] = []
+    for display, value in models:
+        model_id = str(value)
+        if not model_id or _looks_like_non_chat_model(model_id):
+            continue
+
+        lowered = model_id.lower()
+        if provider_key == "openai":
+            # Keep OpenAI chat/reasoning model families.
+            if lowered.startswith("gpt-") or re.match(r"^o\\d", lowered) or lowered in {
+                "o1",
+                "o3",
+                "o3-mini",
+                "o4-mini",
+            }:
+                filtered.append((display, value))
+            continue
+
+        if provider_key == "google":
+            # Keep Gemini chat models only.
+            if lowered.startswith("gemini"):
+                filtered.append((display, value))
+            continue
+
+        if provider_key == "anthropic":
+            # Anthropic list endpoint should already be Claude-only, but keep it strict.
+            if "claude" in lowered:
+                filtered.append((display, value))
+            continue
+
+        # OpenRouter / Ollama: keep everything except obvious non-chat models.
+        filtered.append((display, value))
+
+    return filtered
 
 
 def get_ollama_models() -> list[tuple[str, str]]:
@@ -16,11 +79,17 @@ def get_ollama_models() -> list[tuple[str, str]]:
         # Handle both dict and object response formats
         models = getattr(response, 'models', None) or response.get('models', [])
         if models:
-            return [(getattr(m, 'model', None) or m.get('name', str(m)),
-                     getattr(m, 'model', None) or m.get('name', str(m))) for m in models]
+            result = [
+                (
+                    getattr(m, "model", None) or m.get("name", str(m)),
+                    getattr(m, "model", None) or m.get("name", str(m)),
+                )
+                for m in models
+            ]
+            return _filter_chat_models("ollama", result)
     except Exception:
         pass
-    return [("llama3.1", "llama3.1"), ("llama3.2", "llama3.2")]
+    return _filter_chat_models("ollama", [("llama3.1", "llama3.1"), ("llama3.2", "llama3.2")])
 
 
 def check_ollama_connection() -> bool:
@@ -30,6 +99,147 @@ def check_ollama_connection() -> bool:
         return True
     except Exception:
         return False
+
+
+def get_openai_compatible_models(base_url: str) -> list[tuple[str, str]]:
+    """Fetch model ids from an OpenAI-compatible /v1/models endpoint.
+
+    Returns [] on any failure.
+    """
+    if not base_url:
+        return []
+
+    cached = _OPENAI_MODEL_LIST_CACHE.get(base_url)
+    if cached is not None:
+        return cached
+
+    max_items = int(os.getenv("TRADINGAGENTS_DYNAMIC_MODEL_LIST_MAX", "200"))
+    try:
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+        client = OpenAI(base_url=base_url, api_key=api_key)
+        models = client.models.list()
+
+        ids: list[str] = []
+        for model in getattr(models, "data", []) or models:
+            model_id = getattr(model, "id", None)
+            if model_id is None and isinstance(model, dict):
+                model_id = model.get("id")
+            if model_id:
+                ids.append(str(model_id))
+
+        ids = sorted(set(ids))
+        if max_items > 0:
+            ids = ids[:max_items]
+
+        fetched = [(model_id, model_id) for model_id in ids]
+        _OPENAI_MODEL_LIST_CACHE[base_url] = fetched
+        return fetched
+    except Exception:
+        _OPENAI_MODEL_LIST_CACHE[base_url] = []
+        return []
+
+
+def get_anthropic_models(base_url: str) -> list[tuple[str, str]]:
+    """Fetch model ids from Anthropic's /v1/models endpoint.
+
+    Requires ANTHROPIC_API_KEY (or CLAUDE_API_KEY). Returns [] on any failure.
+    """
+    if not base_url:
+        return []
+
+    cached = _ANTHROPIC_MODEL_LIST_CACHE.get(base_url)
+    if cached is not None:
+        return cached
+
+    api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
+    if not api_key:
+        _ANTHROPIC_MODEL_LIST_CACHE[base_url] = []
+        return []
+
+    version = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
+    url = f"{base_url.rstrip('/')}/v1/models"
+    max_items = int(os.getenv("TRADINGAGENTS_DYNAMIC_MODEL_LIST_MAX", "200"))
+    try:
+        resp = requests.get(
+            url,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": version,
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        ids = []
+        for item in payload.get("data", []) or []:
+            model_id = item.get("id")
+            if model_id:
+                ids.append(str(model_id))
+        ids = sorted(set(ids))
+        if max_items > 0:
+            ids = ids[:max_items]
+        fetched = [(model_id, model_id) for model_id in ids]
+        _ANTHROPIC_MODEL_LIST_CACHE[base_url] = fetched
+        return fetched
+    except Exception:
+        _ANTHROPIC_MODEL_LIST_CACHE[base_url] = []
+        return []
+
+
+def get_google_models(base_url: str) -> list[tuple[str, str]]:
+    """Fetch model ids from Google GenAI `models.list`.
+
+    Requires GEMINI_API_KEY or GOOGLE_API_KEY. Returns [] on any failure.
+    """
+    if not base_url:
+        return []
+
+    cached = _GOOGLE_MODEL_LIST_CACHE.get(base_url)
+    if cached is not None:
+        return cached
+
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        _GOOGLE_MODEL_LIST_CACHE[base_url] = []
+        return []
+
+    url = f"{base_url.rstrip('/')}/models"
+    max_items = int(os.getenv("TRADINGAGENTS_DYNAMIC_MODEL_LIST_MAX", "200"))
+    try:
+        resp = requests.get(url, params={"key": api_key}, timeout=20)
+        resp.raise_for_status()
+        payload = resp.json()
+        ids = []
+        for item in payload.get("models", []) or []:
+            name = item.get("name")
+            if not name:
+                continue
+            # API returns "models/<id>"
+            model_id = str(name).split("/", 1)[-1]
+            ids.append(model_id)
+        ids = sorted(set(ids))
+        if max_items > 0:
+            ids = ids[:max_items]
+        fetched = [(model_id, model_id) for model_id in ids]
+        _GOOGLE_MODEL_LIST_CACHE[base_url] = fetched
+        return fetched
+    except Exception:
+        _GOOGLE_MODEL_LIST_CACHE[base_url] = []
+        return []
+
+
+def get_provider_models(provider: str, base_url: Optional[str]) -> list[tuple[str, str]]:
+    provider_key = (provider or "").lower()
+    if provider_key == "ollama":
+        return get_ollama_models()
+    if provider_key in {"openai", "openrouter"}:
+        return _filter_chat_models(provider_key, get_openai_compatible_models(base_url or ""))
+    if provider_key == "anthropic":
+        return _filter_chat_models(provider_key, get_anthropic_models(base_url or ""))
+    if provider_key == "google":
+        return _filter_chat_models(provider_key, get_google_models(base_url or ""))
+    return []
+
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),
@@ -150,42 +360,13 @@ def select_research_depth(lang: str = "en") -> int:
     return choice
 
 
-def select_shallow_thinking_agent(provider, lang: str = "en") -> str:
+def select_shallow_thinking_agent(provider, lang: str = "en", backend_url: Optional[str] = None) -> str:
     """Select shallow thinking llm engine using an interactive selection."""
 
-    # Define shallow thinking llm engine options with their corresponding model names
-    SHALLOW_AGENT_OPTIONS = {
-        "openai": [
-            ("GPT-4o-mini - Fast and efficient for quick tasks", "gpt-4o-mini"),
-            ("GPT-4.1-nano - Ultra-lightweight model for basic operations", "gpt-4.1-nano"),
-            ("GPT-4.1-mini - Compact model with good performance", "gpt-4.1-mini"),
-            ("GPT-4o - Standard model with solid capabilities", "gpt-4o"),
-        ],
-        "anthropic": [
-            ("Claude Haiku 3.5 - Fast inference and standard capabilities", "claude-3-5-haiku-latest"),
-            ("Claude Sonnet 3.5 - Highly capable standard model", "claude-3-5-sonnet-latest"),
-            ("Claude Sonnet 3.7 - Exceptional hybrid reasoning and agentic capabilities", "claude-3-7-sonnet-latest"),
-            ("Claude Sonnet 4 - High performance and excellent reasoning", "claude-sonnet-4-0"),
-        ],
-        "google": [
-            ("Gemini 2.0 Flash-Lite - Cost efficiency and low latency", "gemini-2.0-flash-lite"),
-            ("Gemini 2.0 Flash - Next generation features, speed, and thinking", "gemini-2.0-flash"),
-            ("Gemini 2.5 Flash - Adaptive thinking, cost efficiency", "gemini-2.5-flash-preview-05-20"),
-        ],
-        "openrouter": [
-            ("Meta: Llama 4 Scout", "meta-llama/llama-4-scout:free"),
-            ("Meta: Llama 3.3 8B Instruct - A lightweight and ultra-fast variant of Llama 3.3 70B", "meta-llama/llama-3.3-8b-instruct:free"),
-            ("google/gemini-2.0-flash-exp:free - Gemini Flash 2.0 offers a significantly faster time to first token", "google/gemini-2.0-flash-exp:free"),
-        ],
-        "ollama": [
-            ("llama3.1 local", "llama3.1"),
-            ("llama3.2 local", "llama3.2"),
-        ]
-    }
-
-    options = SHALLOW_AGENT_OPTIONS.get(provider.lower(), [])
-    if provider.lower() == "ollama":
-        options = get_ollama_models()
+    options = get_provider_models(provider, backend_url)
+    if not options:
+        console.print("\n[red]Failed to fetch model list for the selected provider.[/red]")
+        exit(1)
 
     choice = questionary.select(
         get_text("prompt_quick_llm", lang),
@@ -212,46 +393,13 @@ def select_shallow_thinking_agent(provider, lang: str = "en") -> str:
     return choice
 
 
-def select_deep_thinking_agent(provider, lang: str = "en") -> str:
+def select_deep_thinking_agent(provider, lang: str = "en", backend_url: Optional[str] = None) -> str:
     """Select deep thinking llm engine using an interactive selection."""
 
-    # Define deep thinking llm engine options with their corresponding model names
-    DEEP_AGENT_OPTIONS = {
-        "openai": [
-            ("GPT-4.1-nano - Ultra-lightweight model for basic operations", "gpt-4.1-nano"),
-            ("GPT-4.1-mini - Compact model with good performance", "gpt-4.1-mini"),
-            ("GPT-4o - Standard model with solid capabilities", "gpt-4o"),
-            ("o4-mini - Specialized reasoning model (compact)", "o4-mini"),
-            ("o3-mini - Advanced reasoning model (lightweight)", "o3-mini"),
-            ("o3 - Full advanced reasoning model", "o3"),
-            ("o1 - Premier reasoning and problem-solving model", "o1"),
-        ],
-        "anthropic": [
-            ("Claude Haiku 3.5 - Fast inference and standard capabilities", "claude-3-5-haiku-latest"),
-            ("Claude Sonnet 3.5 - Highly capable standard model", "claude-3-5-sonnet-latest"),
-            ("Claude Sonnet 3.7 - Exceptional hybrid reasoning and agentic capabilities", "claude-3-7-sonnet-latest"),
-            ("Claude Sonnet 4 - High performance and excellent reasoning", "claude-sonnet-4-0"),
-            ("Claude Opus 4 - Most powerful Anthropic model", "	claude-opus-4-0"),
-        ],
-        "google": [
-            ("Gemini 2.0 Flash-Lite - Cost efficiency and low latency", "gemini-2.0-flash-lite"),
-            ("Gemini 2.0 Flash - Next generation features, speed, and thinking", "gemini-2.0-flash"),
-            ("Gemini 2.5 Flash - Adaptive thinking, cost efficiency", "gemini-2.5-flash-preview-05-20"),
-            ("Gemini 2.5 Pro", "gemini-2.5-pro-preview-06-05"),
-        ],
-        "openrouter": [
-            ("DeepSeek V3 - a 685B-parameter, mixture-of-experts model", "deepseek/deepseek-chat-v3-0324:free"),
-            ("Deepseek - latest iteration of the flagship chat model family from the DeepSeek team.", "deepseek/deepseek-chat-v3-0324:free"),
-        ],
-        "ollama": [
-            ("llama3.1 local", "llama3.1"),
-            ("qwen3", "qwen3"),
-        ]
-    }
-    
-    options = DEEP_AGENT_OPTIONS.get(provider.lower(), [])
-    if provider.lower() == "ollama":
-        options = get_ollama_models()
+    options = get_provider_models(provider, backend_url)
+    if not options:
+        console.print("\n[red]Failed to fetch model list for the selected provider.[/red]")
+        exit(1)
 
     choice = questionary.select(
         get_text("prompt_deep_llm", lang),

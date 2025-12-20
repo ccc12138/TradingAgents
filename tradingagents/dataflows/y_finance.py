@@ -3,7 +3,91 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import yfinance as yf
 import os
+import time
+import random
+from pathlib import Path
 from .stockstats_utils import StockstatsUtils
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "too many requests" in message
+        or "rate limited" in message
+        or "rate-limit" in message
+        or "http error 429" in message
+        or "status code 429" in message
+        or "429" in message
+    )
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _cache_is_fresh(path: Path, ttl_seconds: int | None) -> bool:
+    if not path.exists():
+        return False
+    if ttl_seconds is None:
+        return True
+    try:
+        age_seconds = time.time() - path.stat().st_mtime
+    except OSError:
+        return False
+    return age_seconds <= ttl_seconds
+
+
+def _get_yfinance_cache_dir() -> Path:
+    from .config import get_config
+
+    config = get_config()
+    return Path(config.get("data_cache_dir", "dataflows/data_cache"))
+
+
+def _get_yfinance_retry_config() -> tuple[int, float, float]:
+    """
+    Returns (max_attempts, backoff_base_seconds, backoff_jitter_seconds).
+    """
+    from .config import get_config
+
+    config = get_config()
+    max_attempts = int(config.get("yfinance_retry_max_attempts", 5))
+    backoff_base_seconds = float(config.get("yfinance_retry_backoff_base_seconds", 1.0))
+    backoff_jitter_seconds = float(
+        config.get("yfinance_retry_backoff_jitter_seconds", 0.25)
+    )
+    return max_attempts, backoff_base_seconds, backoff_jitter_seconds
+
+
+def _get_yfinance_cache_ttl_seconds() -> int:
+    from .config import get_config
+
+    config = get_config()
+    return int(config.get("yfinance_cache_ttl_seconds", 60 * 60 * 24))
+
+
+def _yfinance_download_with_retries(**download_kwargs):
+    max_attempts, backoff_base_seconds, backoff_jitter_seconds = _get_yfinance_retry_config()
+
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return yf.download(**download_kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if not _is_rate_limit_error(exc) or attempt == max_attempts:
+                raise
+            # Exponential backoff with jitter
+            delay = (backoff_base_seconds * (2 ** (attempt - 1))) + random.uniform(
+                0.0, backoff_jitter_seconds
+            )
+            time.sleep(delay)
+
+    # Defensive: should never reach here
+    raise last_exc if last_exc else RuntimeError("yfinance download failed unexpectedly")
+
 
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
@@ -14,11 +98,45 @@ def get_YFin_data_online(
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
 
-    # Create ticker object
-    ticker = yf.Ticker(symbol.upper())
+    cache_dir = _get_yfinance_cache_dir() / "yfinance" / "history"
+    cache_path = cache_dir / f"{symbol.upper()}-history-{start_date}-{end_date}.csv"
+
+    ttl_seconds = _get_yfinance_cache_ttl_seconds()
+    if _cache_is_fresh(cache_path, ttl_seconds):
+        csv_string = cache_path.read_text(encoding="utf-8")
+        non_empty_lines = [line for line in csv_string.splitlines() if line.strip()]
+        total_records = max(0, len(non_empty_lines) - 1)
+        header = f"# Stock data for {symbol.upper()} from {start_date} to {end_date}\n"
+        header += f"# Total records: {total_records} (cached)\n"
+        header += f"# Cache file: {cache_path}\n\n"
+        return header + csv_string
 
     # Fetch historical data for the specified date range
-    data = ticker.history(start=start_date, end=end_date)
+    # Prefer yf.download over Ticker().history() to reduce request fan-out.
+    try:
+        data = _yfinance_download_with_retries(
+            tickers=symbol.upper(),
+            start=start_date,
+            end=end_date,
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+            group_by="column",
+            multi_level_index=False,
+        )
+    except Exception as exc:
+        # If we're rate-limited, try to fall back to whatever cache exists (even if stale).
+        if _is_rate_limit_error(exc) and cache_path.exists():
+            csv_string = cache_path.read_text(encoding="utf-8")
+            non_empty_lines = [line for line in csv_string.splitlines() if line.strip()]
+            total_records = max(0, len(non_empty_lines) - 1)
+            header = f"# Stock data for {symbol.upper()} from {start_date} to {end_date}\n"
+            header += f"# Total records: {total_records} (cached)\n"
+            header += f"# NOTE: Using stale cache due to yfinance rate limit: {exc}\n"
+            header += f"# Cache file: {cache_path}\n\n"
+            return header + csv_string
+        raise
 
     # Check if data is empty
     if data.empty:
@@ -38,6 +156,7 @@ def get_YFin_data_online(
 
     # Convert DataFrame to CSV string
     csv_string = data.to_csv()
+    _atomic_write_text(cache_path, csv_string)
 
     # Add header information
     header = f"# Stock data for {symbol.upper()} from {start_date} to {end_date}\n"
@@ -216,35 +335,37 @@ def _get_stock_stats_bulk(
             raise Exception("Stockstats fail: Yahoo Finance data not fetched yet!")
     else:
         # Online data fetching with caching
-        today_date = pd.Timestamp.today()
-        curr_date_dt = pd.to_datetime(curr_date)
-        
-        end_date = today_date
-        start_date = today_date - pd.DateOffset(years=15)
-        start_date_str = start_date.strftime("%Y-%m-%d")
-        end_date_str = end_date.strftime("%Y-%m-%d")
-        
-        os.makedirs(config["data_cache_dir"], exist_ok=True)
-        
-        data_file = os.path.join(
-            config["data_cache_dir"],
-            f"{symbol}-YFin-data-{start_date_str}-{end_date_str}.csv",
-        )
-        
-        if os.path.exists(data_file):
+        cache_dir = _get_yfinance_cache_dir() / "yfinance" / "download"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # Stable cache key so we don't generate a new file every day.
+        data_file = cache_dir / f"{symbol.upper()}-download-period-15y-1d-auto_adjust.csv"
+        ttl_seconds = _get_yfinance_cache_ttl_seconds()
+
+        if _cache_is_fresh(data_file, ttl_seconds):
             data = pd.read_csv(data_file)
             data["Date"] = pd.to_datetime(data["Date"])
         else:
-            data = yf.download(
-                symbol,
-                start=start_date_str,
-                end=end_date_str,
-                multi_level_index=False,
-                progress=False,
-                auto_adjust=True,
-            )
-            data = data.reset_index()
-            data.to_csv(data_file, index=False)
+            try:
+                data = _yfinance_download_with_retries(
+                    tickers=symbol.upper(),
+                    period="15y",
+                    interval="1d",
+                    auto_adjust=True,
+                    progress=False,
+                    threads=False,
+                    group_by="column",
+                    multi_level_index=False,
+                )
+                data = data.reset_index()
+                data.to_csv(data_file, index=False)
+            except Exception as exc:
+                # If we're rate-limited, fall back to whatever cache exists (even if stale).
+                if _is_rate_limit_error(exc) and data_file.exists():
+                    data = pd.read_csv(data_file)
+                    data["Date"] = pd.to_datetime(data["Date"])
+                else:
+                    raise
         
         df = wrap(data)
         df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")

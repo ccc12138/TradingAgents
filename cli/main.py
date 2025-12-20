@@ -485,8 +485,12 @@ def get_user_selections():
             get_text("step_thinking", LANG), get_text("prompt_quick_llm", LANG)
         )
     )
-    selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider, LANG)
-    selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider, LANG)
+    selected_shallow_thinker = select_shallow_thinking_agent(
+        selected_llm_provider, LANG, backend_url=backend_url
+    )
+    selected_deep_thinker = select_deep_thinking_agent(
+        selected_llm_provider, LANG, backend_url=backend_url
+    )
 
     return {
         "ticker": selected_ticker,

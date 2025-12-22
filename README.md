@@ -136,6 +136,7 @@ You can also try out the CLI directly by running:
 python -m cli.main
 ```
 You will see a screen where you can select your desired tickers, date, LLMs, research depth, etc.
+If any tool/vendor/LLM call fails during execution, the CLI aborts and exits with a non-zero status code.
 
 <p align="center">
   <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
@@ -150,6 +151,31 @@ An interface will appear showing results as they load, letting you track the age
 <p align="center">
   <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
 </p>
+
+### Web UI (Local)
+
+This repo includes a simple local Web UI with:
+- FastAPI backend (`ta_server/`) + WebSocket streaming
+- React frontend (`web/`) for real-time agent messages, tool calls, and reports
+
+Run the API server:
+```bash
+python -m pip install -r requirements.txt
+uvicorn ta_server.app:app --reload --port 8000
+```
+
+Run the frontend (in a separate terminal):
+```bash
+cd web
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Then open `http://localhost:5173`.
+The UI supports language-prefixed routes:
+- `http://localhost:5173/en`
+- `http://localhost:5173/zh`
 
 ## TradingAgents Package
 
@@ -188,7 +214,7 @@ config["max_debate_rounds"] = 1  # Increase debate rounds
 config["data_vendors"] = {
     "core_stock_apis": "yfinance",           # Options: yfinance, alpha_vantage, local
     "technical_indicators": "yfinance",      # Options: yfinance, alpha_vantage, local
-    "fundamental_data": "alpha_vantage",     # Options: openai, alpha_vantage, local
+    "fundamental_data": "alpha_vantage",     # Options: yfinance, openai, alpha_vantage, local
     "news_data": "alpha_vantage",            # Options: openai, alpha_vantage, google, local
 }
 

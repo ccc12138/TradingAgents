@@ -4,8 +4,28 @@ import pandas as pd
 import json
 from datetime import datetime
 from io import StringIO
+import time
+import threading
 
 API_BASE_URL = "https://www.alphavantage.co/query"
+_AV_RATE_LIMIT_LOCK = threading.Lock()
+_AV_LAST_REQUEST_TS = 0.0
+
+
+def _rate_limit_sleep_if_needed() -> None:
+    """
+    Alpha Vantage free tier enforces per-second burst limits.
+    Throttle requests to reduce 429/Information responses when multiple tools run concurrently.
+    """
+    global _AV_LAST_REQUEST_TS
+    min_interval = float(os.getenv("TRADINGAGENTS_ALPHA_VANTAGE_MIN_INTERVAL_SECONDS", "1.1"))
+    if min_interval <= 0:
+        return
+    now = time.time()
+    sleep_seconds = (_AV_LAST_REQUEST_TS + min_interval) - now
+    if sleep_seconds > 0:
+        time.sleep(sleep_seconds)
+    _AV_LAST_REQUEST_TS = time.time()
 
 def get_api_key() -> str:
     """Retrieve the API key for Alpha Vantage from environment variables."""
@@ -63,7 +83,9 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
         # Remove entitlement if it's None or empty
         api_params.pop("entitlement", None)
     
-    response = requests.get(API_BASE_URL, params=api_params)
+    with _AV_RATE_LIMIT_LOCK:
+        _rate_limit_sleep_if_needed()
+        response = requests.get(API_BASE_URL, params=api_params)
     response.raise_for_status()
 
     response_text = response.text

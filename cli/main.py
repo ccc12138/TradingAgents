@@ -855,32 +855,33 @@ def run_analysis():
 
         # Stream the analysis
         trace = []
-        for chunk in graph.graph.stream(init_agent_state, **args):
-            if len(chunk["messages"]) > 0:
-                # Get the last message from the chunk
-                last_message = chunk["messages"][-1]
+        try:
+            for chunk in graph.graph.stream(init_agent_state, **args):
+                if chunk.get("messages"):
+                    # Get the last message from the chunk
+                    last_message = chunk["messages"][-1]
 
-                # Extract message content and type
-                if hasattr(last_message, "content"):
-                    content = extract_content_string(last_message.content)  # Use the helper function
-                    msg_type = "Reasoning"
-                else:
-                    content = str(last_message)
-                    msg_type = "System"
+                    # Extract message content and type
+                    if hasattr(last_message, "content"):
+                        content = extract_content_string(last_message.content)  # Use the helper function
+                        msg_type = "Reasoning"
+                    else:
+                        content = str(last_message)
+                        msg_type = "System"
 
-                # Add message to buffer
-                message_buffer.add_message(msg_type, content)                
+                    # Add message to buffer
+                    message_buffer.add_message(msg_type, content)
 
-                # If it's a tool call, add it to tool calls
-                if hasattr(last_message, "tool_calls"):
-                    for tool_call in last_message.tool_calls:
-                        # Handle both dictionary and object tool calls
-                        if isinstance(tool_call, dict):
-                            message_buffer.add_tool_call(
-                                tool_call["name"], tool_call["args"]
-                            )
-                        else:
-                            message_buffer.add_tool_call(tool_call.name, tool_call.args)
+                    # If it's a tool call, add it to tool calls
+                    if hasattr(last_message, "tool_calls"):
+                        for tool_call in last_message.tool_calls:
+                            # Handle both dictionary and object tool calls
+                            if isinstance(tool_call, dict):
+                                message_buffer.add_tool_call(
+                                    tool_call["name"], tool_call["args"]
+                                )
+                            else:
+                                message_buffer.add_tool_call(tool_call.name, tool_call.args)
 
                 # Update reports and agent status based on chunk content
                 # Analyst Team Reports
@@ -1083,7 +1084,24 @@ def run_analysis():
                 # Update the display
                 update_display(layout)
 
-            trace.append(chunk)
+                trace.append(chunk)
+        except Exception as exc:
+            # Fail-fast: abort the run if any agent/tool/LLM step errors.
+            message_buffer.add_message("Error", f"{type(exc).__name__}: {exc}")
+            for agent in message_buffer.agent_status:
+                if message_buffer.agent_status[agent] in ("pending", "in_progress"):
+                    message_buffer.update_agent_status(agent, "error")
+            update_display(layout, spinner_text="Error")
+            console.print(f"[red]ERROR: {type(exc).__name__}: {exc}[/red]")
+            raise typer.Exit(code=1) from exc
+
+        if not trace:
+            message_buffer.add_message("Error", "No graph output produced (empty trace).")
+            for agent in message_buffer.agent_status:
+                if message_buffer.agent_status[agent] in ("pending", "in_progress"):
+                    message_buffer.update_agent_status(agent, "error")
+            update_display(layout, spinner_text="Error")
+            raise typer.Exit(code=1)
 
         # Get final state and decision
         final_state = trace[-1]

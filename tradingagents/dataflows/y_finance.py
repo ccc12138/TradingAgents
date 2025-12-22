@@ -414,6 +414,123 @@ def get_stockstats_indicator(
     return str(indicator_value)
 
 
+def get_fundamentals(
+    ticker: Annotated[str, "ticker symbol of the company"],
+    curr_date: Annotated[str, "current date (not used for yfinance)"] = None,
+) -> str:
+    """
+    Retrieve company fundamentals using yfinance.
+
+    Notes:
+        - This uses `yfinance.Ticker(...).info`, which may be rate-limited by Yahoo.
+        - Results are cached to reduce request volume.
+    """
+    import json
+
+    symbol = ticker.upper()
+    cache_dir = _get_yfinance_cache_dir() / "yfinance" / "fundamentals"
+    cache_path = cache_dir / f"{symbol}-fundamentals.json"
+
+    ttl_seconds = _get_yfinance_cache_ttl_seconds()
+    if _cache_is_fresh(cache_path, ttl_seconds):
+        return (
+            f"# Fundamentals for {symbol} (cached)\n"
+            f"# Cache file: {cache_path}\n\n"
+            + cache_path.read_text(encoding="utf-8")
+        )
+
+    max_attempts, backoff_base_seconds, backoff_jitter_seconds = _get_yfinance_retry_config()
+    last_exc: Exception | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            info = yf.Ticker(symbol).info
+            if not isinstance(info, dict) or not info:
+                raise ValueError("yfinance returned empty fundamentals info")
+
+            selected_keys = [
+                "symbol",
+                "shortName",
+                "longName",
+                "sector",
+                "industry",
+                "country",
+                "website",
+                "currency",
+                "quoteType",
+                "marketCap",
+                "enterpriseValue",
+                "trailingPE",
+                "forwardPE",
+                "pegRatio",
+                "priceToSalesTrailing12Months",
+                "priceToBook",
+                "enterpriseToRevenue",
+                "enterpriseToEbitda",
+                "beta",
+                "dividendRate",
+                "dividendYield",
+                "payoutRatio",
+                "profitMargins",
+                "grossMargins",
+                "operatingMargins",
+                "ebitdaMargins",
+                "returnOnAssets",
+                "returnOnEquity",
+                "totalRevenue",
+                "revenueGrowth",
+                "earningsGrowth",
+                "freeCashflow",
+                "totalCash",
+                "totalDebt",
+                "debtToEquity",
+                "currentRatio",
+                "quickRatio",
+                "52WeekChange",
+                "lastFiscalYearEnd",
+                "nextFiscalYearEnd",
+            ]
+
+            payload = {
+                "ticker": symbol,
+                "retrieved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "source": "yfinance",
+                "data": {k: info.get(k) for k in selected_keys if k in info},
+            }
+
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            _atomic_write_text(
+                cache_path,
+                json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            )
+
+            return (
+                f"# Fundamentals for {symbol}\n"
+                f"# Data retrieved on: {payload['retrieved_at']}\n\n"
+                + json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+            )
+
+        except Exception as exc:
+            last_exc = exc
+            if not _is_rate_limit_error(exc) or attempt == max_attempts:
+                # If we're rate-limited, try to fall back to stale cache if present.
+                if _is_rate_limit_error(exc) and cache_path.exists():
+                    return (
+                        f"# Fundamentals for {symbol} (cached)\n"
+                        f"# NOTE: Using stale cache due to rate limit error: {exc}\n"
+                        f"# Cache file: {cache_path}\n\n"
+                        + cache_path.read_text(encoding="utf-8")
+                    )
+                raise
+
+            delay = (backoff_base_seconds * (2 ** (attempt - 1))) + random.uniform(
+                0.0, backoff_jitter_seconds
+            )
+            time.sleep(delay)
+
+    raise last_exc if last_exc else RuntimeError("yfinance fundamentals failed unexpectedly")
+
+
 def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",

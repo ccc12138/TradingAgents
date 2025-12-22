@@ -3,7 +3,10 @@ import os
 DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", "./results"),
-    "data_dir": "/Users/yluo/Documents/Code/ScAI/FR1-data",
+    "data_dir": os.getenv(
+        "TRADINGAGENTS_DATA_DIR",
+        os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), ".")), "data"),
+    ),
     "data_cache_dir": os.path.join(
         os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "dataflows/data_cache",
@@ -37,11 +40,14 @@ DEFAULT_CONFIG = {
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
     # Data vendor configuration
+    # If true, do not attempt fallback vendors when a primary vendor fails.
+    # This makes runs "fail-fast" on the configured vendor(s) for each tool/category.
+    "disable_vendor_fallback": False,
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
         "core_stock_apis": "yfinance",       # Options: yfinance, alpha_vantage, local
         "technical_indicators": "yfinance",  # Options: yfinance, alpha_vantage, local
-        "fundamental_data": "alpha_vantage", # Options: openai, alpha_vantage, local
+        "fundamental_data": "alpha_vantage", # Options: yfinance, openai, alpha_vantage, local
         "news_data": "alpha_vantage",        # Options: openai, alpha_vantage, google, local
     },
     # Tool-level configuration (takes precedence over category-level)

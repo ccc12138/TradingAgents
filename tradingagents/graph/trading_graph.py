@@ -104,7 +104,10 @@ class TradingAgentsGraph:
         self.lang = self.config.get("language", "en")
 
         # Initialize components
-        self.conditional_logic = ConditionalLogic()
+        self.conditional_logic = ConditionalLogic(
+            max_debate_rounds=int(self.config.get("max_debate_rounds", 1)),
+            max_risk_discuss_rounds=int(self.config.get("max_risk_discuss_rounds", 1)),
+        )
         self.graph_setup = GraphSetup(
             self.quick_thinking_llm,
             self.deep_thinking_llm,
@@ -182,12 +185,12 @@ class TradingAgentsGraph:
             # Debug mode with tracing
             trace = []
             for chunk in self.graph.stream(init_agent_state, **args):
-                if len(chunk["messages"]) == 0:
-                    pass
-                else:
+                if chunk.get("messages"):
                     chunk["messages"][-1].pretty_print()
-                    trace.append(chunk)
+                trace.append(chunk)
 
+            if not trace:
+                raise RuntimeError("Graph produced no output (empty trace).")
             final_state = trace[-1]
         else:
             # Standard mode without tracing

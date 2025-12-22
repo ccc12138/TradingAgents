@@ -2,7 +2,15 @@ from typing import Annotated
 
 # Import from vendor-specific modules
 from .local import get_YFin_data, get_finnhub_news, get_finnhub_company_insider_sentiment, get_finnhub_company_insider_transactions, get_simfin_balance_sheet, get_simfin_cashflow, get_simfin_income_statements, get_reddit_global_news, get_reddit_company_news
-from .y_finance import get_YFin_data_online, get_stock_stats_indicators_window, get_balance_sheet as get_yfinance_balance_sheet, get_cashflow as get_yfinance_cashflow, get_income_statement as get_yfinance_income_statement, get_insider_transactions as get_yfinance_insider_transactions
+from .y_finance import (
+    get_YFin_data_online,
+    get_stock_stats_indicators_window,
+    get_fundamentals as get_yfinance_fundamentals,
+    get_balance_sheet as get_yfinance_balance_sheet,
+    get_cashflow as get_yfinance_cashflow,
+    get_income_statement as get_yfinance_income_statement,
+    get_insider_transactions as get_yfinance_insider_transactions,
+)
 from .google import get_google_news
 from .openai import get_stock_news_openai, get_global_news_openai, get_fundamentals_openai
 from .alpha_vantage import (
@@ -89,6 +97,7 @@ VENDOR_METHODS = {
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "openai": get_fundamentals_openai,
+        "yfinance": get_yfinance_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
@@ -153,10 +162,42 @@ def get_vendor(category: str, method: str = None) -> str:
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")
 
+
+_ALLOW_EMPTY_RESULTS_METHODS = {"get_news", "get_global_news"}
+
+
+def _result_failure_reason(method: str, result) -> str | None:
+    """
+    Some vendor implementations return error strings instead of raising.
+    Treat these as failures so routing/fail-fast behavior is consistent.
+    """
+    if result is None:
+        return "returned None"
+
+    if isinstance(result, str):
+        stripped = result.strip()
+        if stripped == "":
+            if method in _ALLOW_EMPTY_RESULTS_METHODS:
+                return None
+            return "returned empty string"
+
+        lowered = stripped.lower()
+        if lowered.startswith(("error:", "error ")):
+            return stripped.splitlines()[0]
+
+        if lowered.startswith("no ") and " data found" in lowered:
+            if method in _ALLOW_EMPTY_RESULTS_METHODS:
+                return None
+            return stripped.splitlines()[0]
+
+    return None
+
+
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
+    config = get_config()
 
     # Handle comma-separated vendors
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
@@ -167,11 +208,13 @@ def route_to_vendor(method: str, *args, **kwargs):
     # Get all available vendors for this method for fallback
     all_available_vendors = list(VENDOR_METHODS[method].keys())
     
-    # Create fallback vendor list: primary vendors first, then remaining vendors as fallbacks
+    # Create fallback vendor list: primary vendors first, then remaining vendors as fallbacks.
+    # Can be disabled via config for strict fail-fast behavior.
     fallback_vendors = primary_vendors.copy()
-    for vendor in all_available_vendors:
-        if vendor not in fallback_vendors:
-            fallback_vendors.append(vendor)
+    if not config.get("disable_vendor_fallback", False):
+        for vendor in all_available_vendors:
+            if vendor not in fallback_vendors:
+                fallback_vendors.append(vendor)
 
     # Debug: Print fallback ordering
     primary_str = " → ".join(primary_vendors)
@@ -183,6 +226,7 @@ def route_to_vendor(method: str, *args, **kwargs):
     vendor_attempt_count = 0
     any_primary_vendor_attempted = False
     successful_vendor = None
+    vendor_errors: list[dict] = []
 
     for vendor in fallback_vendors:
         if vendor not in VENDOR_METHODS[method]:
@@ -215,6 +259,21 @@ def route_to_vendor(method: str, *args, **kwargs):
             try:
                 print(f"DEBUG: Calling {impl_func.__name__} from vendor '{vendor_name}'...")
                 result = impl_func(*args, **kwargs)
+                failure_reason = _result_failure_reason(method, result)
+                if failure_reason:
+                    print(
+                        f"FAILED: {impl_func.__name__} from vendor '{vendor_name}' returned a failure result: {failure_reason}"
+                    )
+                    vendor_errors.append(
+                        {
+                            "vendor": vendor_name,
+                            "impl": impl_func.__name__,
+                            "exc_type": "BadResult",
+                            "message": str(failure_reason),
+                        }
+                    )
+                    continue
+
                 vendor_results.append(result)
                 print(f"SUCCESS: {impl_func.__name__} from vendor '{vendor_name}' completed successfully")
                     
@@ -222,11 +281,27 @@ def route_to_vendor(method: str, *args, **kwargs):
                 if vendor == "alpha_vantage":
                     print(f"RATE_LIMIT: Alpha Vantage rate limit exceeded, falling back to next available vendor")
                     print(f"DEBUG: Rate limit details: {e}")
+                vendor_errors.append(
+                    {
+                        "vendor": vendor_name,
+                        "impl": impl_func.__name__,
+                        "exc_type": type(e).__name__,
+                        "message": str(e),
+                    }
+                )
                 # Continue to next vendor for fallback
                 continue
             except Exception as e:
                 # Log error but continue with other implementations
                 print(f"FAILED: {impl_func.__name__} from vendor '{vendor_name}' failed: {e}")
+                vendor_errors.append(
+                    {
+                        "vendor": vendor_name,
+                        "impl": impl_func.__name__,
+                        "exc_type": type(e).__name__,
+                        "message": str(e),
+                    }
+                )
                 continue
 
         # Add this vendor's results
@@ -247,7 +322,49 @@ def route_to_vendor(method: str, *args, **kwargs):
     # Final result summary
     if not results:
         print(f"FAILURE: All {vendor_attempt_count} vendor attempts failed for method '{method}'")
-        raise RuntimeError(f"All vendor implementations failed for method '{method}'")
+        attempted_vendors_str = " → ".join(
+            [v for v in fallback_vendors if v in VENDOR_METHODS.get(method, {})]
+        )
+        error_lines = []
+        for err in vendor_errors:
+            msg = err.get("message", "")
+            if len(msg) > 300:
+                msg = msg[:300] + "…"
+            error_lines.append(
+                f"- {err.get('vendor')}:{err.get('impl')} -> {err.get('exc_type')}: {msg}"
+            )
+
+        hints = []
+        combined_messages = "\n".join(e.get("message", "") for e in vendor_errors)
+        vendors_with_errors = {e.get("vendor") for e in vendor_errors if e.get("vendor")}
+
+        if "alpha_vantage" in vendors_with_errors:
+            hints.append(
+                "Set `ALPHA_VANTAGE_API_KEY` (Alpha Vantage) or switch `data_vendors['fundamental_data']` to `yfinance`."
+            )
+        if "openai" in vendors_with_errors:
+            hints.append(
+                "Set `OPENAI_API_KEY` (or configure your LLM provider credentials) if using the `openai` vendor."
+            )
+        if "yfinance" in vendors_with_errors and "no module named" in combined_messages.lower():
+            hints.append("Install `yfinance` (dependency) or disable the `yfinance` vendor.")
+
+        hint_block = "\n".join(f"- {h}" for h in hints) if hints else "- Check your vendor config and API/network access."
+        error_block = "\n".join(error_lines) if error_lines else "- (no exception details captured)"
+
+        raise RuntimeError(
+            "\n".join(
+                [
+                    f"All vendor implementations failed for method '{method}'.",
+                    f"Configured vendor(s): {vendor_config}",
+                    f"Attempted vendor order: {attempted_vendors_str or '(none)'}",
+                    "Errors:",
+                    error_block,
+                    "Fix hints:",
+                    hint_block,
+                ]
+            )
+        )
     else:
         print(f"FINAL: Method '{method}' completed with {len(results)} result(s) from {vendor_attempt_count} vendor attempt(s)")
 
